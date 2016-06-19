@@ -119,8 +119,8 @@ class TestControlMatlab(unittest.TestCase):
         # print('gain_sim:', gain_sim)
 
         #All gain values must be approximately equal to the known gain
-        assert_array_almost_equal([gain_abcd[0,0],   gain_zpk[0,0],
-                                   gain_numden[0,0], gain_sys_ss[0,0], gain_sim],
+        assert_array_almost_equal([gain_abcd,   gain_zpk,
+                                   gain_numden, gain_sys_ss, gain_sim],
                                   [0.026948, 0.026948, 0.026948, 0.026948,
                                    0.026948],
                                   decimal=6)
@@ -144,6 +144,9 @@ class TestControlMatlab(unittest.TestCase):
         X0 = array([1, 1])
         t, y = step(sys, T, X0)
         plot(t, y)
+
+        # Test output of state vector
+        t, y, x = step(sys, return_x=True)
 
         #Test MIMO system
         A, B, C, D = self.make_MIMO_mats()

@@ -257,7 +257,7 @@ class TestMatlab(unittest.TestCase):
         gm, pm, wg, wp = margin(self.siso_ss2);
         gm, pm, wg, wp = margin(self.siso_ss2*self.siso_ss2*2);
         np.testing.assert_array_almost_equal(
-            [gm, pm, wg, wp], [1.5451, 75.9933, 0.6559, 1.2720], decimal=3)
+            [gm, pm, wg, wp], [1.5451, 75.9933, 1.2720, 0.6559], decimal=3)
 
     def testDcgain(self):
         #Create different forms of a SISO system
@@ -283,7 +283,7 @@ class TestMatlab(unittest.TestCase):
 
         #All gain values must be approximately equal to the known gain
         np.testing.assert_array_almost_equal(
-            [gain_abcd[0,0], gain_zpk[0,0], gain_numden[0,0], gain_sys_ss[0,0],
+            [gain_abcd, gain_zpk, gain_numden, gain_sys_ss,
              gain_sim],
             [59, 59, 59, 59, 59])
 
@@ -310,7 +310,7 @@ class TestMatlab(unittest.TestCase):
         rlocus(self.siso_tf1)
         rlocus(self.siso_tf2)
         klist = [1, 10, 100]
-        rlist, klist_out = rlocus(self.siso_tf2, klist=klist, Plot=False)
+        rlist, klist_out = rlocus(self.siso_tf2, klist, Plot=False)
         np.testing.assert_equal(len(rlist), len(klist))
         np.testing.assert_array_equal(klist, klist_out)
 
@@ -554,8 +554,6 @@ class TestMatlab(unittest.TestCase):
                       -0.260952977031384  -0.274201791021713;
                       -0.304617775734327   0.075182622718853"""), sysd.B)
 
-
-    @unittest.skip("need to update margin command")
     def testCombi01(self):
         # test from a "real" case, combines tf, ss, connect and margin
         # this is a type 2 system, with phase starting at -180. The
@@ -610,8 +608,8 @@ class TestMatlab(unittest.TestCase):
         # print("%f %f %f %f" % (gm, pm, wg, wp))
         self.assertAlmostEqual(gm, 3.32065569155)
         self.assertAlmostEqual(pm, 46.9740430224)
-        self.assertAlmostEqual(wp, 0.0616288455466)
         self.assertAlmostEqual(wg, 0.176469728448)
+        self.assertAlmostEqual(wp, 0.0616288455466)
 
 #! TODO: not yet implemented
 #    def testMIMOtfdata(self):

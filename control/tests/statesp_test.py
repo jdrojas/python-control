@@ -10,7 +10,6 @@ from control import matlab
 from control.statesp import StateSpace, _convertToStateSpace
 from control.xferfcn import TransferFunction
 
-
 class TestStateSpace(unittest.TestCase):
     """Tests for the StateSpace class."""
 
@@ -33,11 +32,12 @@ class TestStateSpace(unittest.TestCase):
     def testPole(self):
         """Evaluate the poles of a MIMO system."""
 
-        p = self.sys1.pole()
-
-        np.testing.assert_array_almost_equal(p, [3.34747678408874,
+        p = np.sort(self.sys1.pole())
+        true_p = np.sort([3.34747678408874,
             -3.17373839204437 + 1.47492908003839j,
             -3.17373839204437 - 1.47492908003839j])
+
+        np.testing.assert_array_almost_equal(p, true_p)
 
     def testZero(self):
         """Evaluate the zeros of a SISO system."""
@@ -223,6 +223,17 @@ class TestStateSpace(unittest.TestCase):
                 sys1.D[0,1])
 
         assert sys1.dt == sys1_11.dt
+
+    def test_dcgain(self):
+        sys = StateSpace(-2.,6.,5.,0)
+        np.testing.assert_equal(sys.dcgain(), 15.)
+
+        sys2 = StateSpace(-2, [6., 4.], [[5.],[7.],[11]], np.zeros((3,2)))
+        expected = np.array([[15., 10.], [21., 14.], [33., 22.]])
+        np.testing.assert_array_equal(sys2.dcgain(), expected)
+
+        sys3 = StateSpace(0., 1., 1., 0.)
+        np.testing.assert_equal(sys3.dcgain(), np.nan)
 
 class TestRss(unittest.TestCase):
     """These are tests for the proper functionality of statesp.rss."""

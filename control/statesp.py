@@ -6,33 +6,6 @@ This file contains the StateSpace class, which is used to represent linear
 systems in state space.  This is the primary representation for the
 python-control library.
 
-Routines in this module:
-
-StateSpace.__init__
-StateSpace._remove_useless_states
-StateSpace.copy
-StateSpace.__str__
-StateSpace.__repr__
-StateSpace.__neg__
-StateSpace.__add__
-StateSpace.__radd__
-StateSpace.__sub__
-StateSpace.__rsub__
-StateSpace.__mul__
-StateSpace.__rmul__
-StateSpace.__div__
-StateSpace.__rdiv__
-StateSpace.evalfr
-StateSpace.freqresp
-StateSpace.pole
-StateSpace.zero
-StateSpace.feedback
-StateSpace.returnScipySignalLTI
-StateSpace.append
-StateSpace.__getitem__
-_convertToStateSpace
-_rss_generate
-
 """
 
 # Python 3 compatability (needs to go here)
@@ -77,17 +50,21 @@ Revised: Kevin K. Chen, Dec 10
 $Id$
 """
 
+import numpy as np
 from numpy import all, angle, any, array, asarray, concatenate, cos, delete, \
     dot, empty, exp, eye, matrix, ones, pi, poly, poly1d, roots, shape, sin, \
     zeros, squeeze
 from numpy.random import rand, randn
-from numpy.linalg import inv, det, solve
+from numpy.linalg import solve, eigvals, matrix_rank
 from numpy.linalg.linalg import LinAlgError
 from scipy.signal import lti, cont2discrete
 # from exceptions import Exception
 import warnings
 from .lti import LTI, timebase, timebaseEqual, isdtime
 from .xferfcn import _convertToTransferFunction
+from copy import deepcopy
+
+__all__ = ['StateSpace', 'ss', 'rss', 'drss', 'tf2ss', 'ssdata']
 
 class StateSpace(LTI):
     """A class for representing state-space models
@@ -428,7 +405,7 @@ but B has %i row(s)\n(output(s))." % (self.inputs, other.outputs))
     def pole(self):
         """Compute the poles of a state space system."""
 
-        return roots(poly(self.A))
+        return eigvals(self.A)
 
     def zero(self):
         """Compute the zeros of a state space system."""
@@ -475,21 +452,24 @@ inputs/outputs for feedback.")
         D2 = other.D
 
         F = eye(self.inputs) - sign * D2 * D1
-        if abs(det(F)) < 1.e-6:
+        if matrix_rank(F) != self.inputs:
             raise ValueError("I - sign * D2 * D1 is singular.")
 
-        E = inv(F)
-        T1 = eye(self.outputs) + sign * D1 * E * D2
-        T2 = eye(self.inputs) + sign * E * D2 * D1
+        # Precompute F\D2 and F\C2 (E = inv(F))
+        E_D2 = solve(F, D2)
+        E_C2 = solve(F, C2)
+
+        T1 = eye(self.outputs) + sign * D1 * E_D2
+        T2 = eye(self.inputs) + sign * E_D2 * D1
 
         A = concatenate(
             (concatenate(
-                (A1 + sign * B1 * E * D2 * C1, sign * B1 * E * C2), axis=1),
+                (A1 + sign * B1 * E_D2 * C1, sign * B1 * E_C2), axis=1),
             concatenate(
-                (B2 * T1 * C1, A2 + sign * B2 * D1 * E * C2), axis=1)),
+                (B2 * T1 * C1, A2 + sign * B2 * D1 * E_C2), axis=1)),
             axis=0)
         B = concatenate((B1 * T2, B2 * D1 * T2), axis=0)
-        C = concatenate((T1 * C1, sign * D1 * E * C2), axis=1)
+        C = concatenate((T1 * C1, sign * D1 * E_C2), axis=1)
         D = D1 * T2
 
         return StateSpace(A, B, C, D, dt)
@@ -614,6 +594,27 @@ inputs/outputs for feedback.")
         sys = (self.A, self.B, self.C, self.D)
         Ad, Bd, C, D, dt = cont2discrete(sys, Ts, method, alpha)
         return StateSpace(Ad, Bd, C, D, dt)
+
+    def dcgain(self):
+        """Return the zero-frequency gain
+
+        The zero-frequency gain of a state-space system is given by:
+
+        .. math: G(0) = - C A^{-1} B + D
+
+        Returns
+        -------
+        gain : ndarray
+            The zero-frequency gain, or np.nan if the system has a pole
+            at the origin
+        """
+        try:
+            gain = np.asarray(self.D -
+                              self.C.dot(np.linalg.solve(self.A, self.B)))
+        except LinAlgError:
+            # zero eigenvalue: singular matrix
+            return np.nan
+        return np.squeeze(gain)
 
 
 # TODO: add discrete time check
@@ -924,3 +925,253 @@ def _mimo2simo(sys, input, warn_conversion=False):
         sys = StateSpace(sys.A, new_B, sys.C, new_D, sys.dt)
 
     return sys
+
+def ss(*args):
+    """
+    Create a state space system.
+
+    The function accepts either 1, 4 or 5 parameters:
+
+    ``ss(sys)``
+        Convert a linear system into space system form. Always creates a
+        new system, even if sys is already a StateSpace object.
+
+    ``ss(A, B, C, D)``
+        Create a state space system from the matrices of its state and
+        output equations:
+
+        .. math::
+            \dot x = A \cdot x + B \cdot u
+
+            y = C \cdot x + D \cdot u
+
+    ``ss(A, B, C, D, dt)``
+        Create a discrete-time state space system from the matrices of
+        its state and output equations:
+
+        .. math::
+            x[k+1] = A \cdot x[k] + B \cdot u[k]
+
+            y[k] = C \cdot x[k] + D \cdot u[ki]
+
+        The matrices can be given as *array like* data types or strings.
+        Everything that the constructor of :class:`numpy.matrix` accepts is
+        permissible here too.
+
+    Parameters
+    ----------
+    sys: StateSpace or TransferFunction
+        A linear system
+    A: array_like or string
+        System matrix
+    B: array_like or string
+        Control matrix
+    C: array_like or string
+        Output matrix
+    D: array_like or string
+        Feed forward matrix
+    dt: If present, specifies the sampling period and a discrete time
+        system is created
+
+    Returns
+    -------
+    out: :class:`StateSpace`
+        The new linear system
+
+    Raises
+    ------
+    ValueError
+        if matrix sizes are not self-consistent
+
+    See Also
+    --------
+    tf
+    ss2tf
+    tf2ss
+
+    Examples
+    --------
+    >>> # Create a StateSpace object from four "matrices".
+    >>> sys1 = ss("1. -2; 3. -4", "5.; 7", "6. 8", "9.")
+
+    >>> # Convert a TransferFunction to a StateSpace object.
+    >>> sys_tf = tf([2.], [1., 3])
+    >>> sys2 = ss(sys_tf)
+
+    """
+
+    if len(args) == 4 or len(args) == 5:
+        return StateSpace(*args)
+    elif len(args) == 1:
+        from .xferfcn import TransferFunction
+        sys = args[0]
+        if isinstance(sys, StateSpace):
+            return deepcopy(sys)
+        elif isinstance(sys, TransferFunction):
+            return tf2ss(sys)
+        else:
+            raise TypeError("ss(sys): sys must be a StateSpace or \
+TransferFunction object.  It is %s." % type(sys))
+    else:
+        raise ValueError("Needs 1 or 4 arguments; received %i." % len(args))
+
+def tf2ss(*args):
+    """
+    Transform a transfer function to a state space system.
+
+    The function accepts either 1 or 2 parameters:
+
+    ``tf2ss(sys)``
+        Convert a linear system into transfer function form. Always creates
+        a new system, even if sys is already a TransferFunction object.
+
+    ``tf2ss(num, den)``
+        Create a transfer function system from its numerator and denominator
+        polynomial coefficients.
+
+        For details see: :func:`tf`
+
+    Parameters
+    ----------
+    sys: LTI (StateSpace or TransferFunction)
+        A linear system
+    num: array_like, or list of list of array_like
+        Polynomial coefficients of the numerator
+    den: array_like, or list of list of array_like
+        Polynomial coefficients of the denominator
+
+    Returns
+    -------
+    out: StateSpace
+        New linear system in state space form
+
+    Raises
+    ------
+    ValueError
+        if `num` and `den` have invalid or unequal dimensions, or if an
+        invalid number of arguments is passed in
+    TypeError
+        if `num` or `den` are of incorrect type, or if sys is not a
+        TransferFunction object
+
+    See Also
+    --------
+    ss
+    tf
+    ss2tf
+
+    Examples
+    --------
+    >>> num = [[[1., 2.], [3., 4.]], [[5., 6.], [7., 8.]]]
+    >>> den = [[[9., 8., 7.], [6., 5., 4.]], [[3., 2., 1.], [-1., -2., -3.]]]
+    >>> sys1 = tf2ss(num, den)
+
+    >>> sys_tf = tf(num, den)
+    >>> sys2 = tf2ss(sys_tf)
+
+    """
+
+    from .xferfcn import TransferFunction
+    if len(args) == 2 or len(args) == 3:
+        # Assume we were given the num, den
+        return _convertToStateSpace(TransferFunction(*args))
+
+    elif len(args) == 1:
+        sys = args[0]
+        if not isinstance(sys, TransferFunction):
+            raise TypeError("tf2ss(sys): sys must be a TransferFunction \
+object.")
+        return _convertToStateSpace(sys)
+    else:
+        raise ValueError("Needs 1 or 2 arguments; received %i." % len(args))
+
+def rss(states=1, outputs=1, inputs=1):
+    """
+    Create a stable **continuous** random state space object.
+
+    Parameters
+    ----------
+    states: integer
+        Number of state variables
+    inputs: integer
+        Number of system inputs
+    outputs: integer
+        Number of system outputs
+
+    Returns
+    -------
+    sys: StateSpace
+        The randomly created linear system
+
+    Raises
+    ------
+    ValueError
+        if any input is not a positive integer
+
+    See Also
+    --------
+    drss
+
+    Notes
+    -----
+    If the number of states, inputs, or outputs is not specified, then the
+    missing numbers are assumed to be 1.  The poles of the returned system
+    will always have a negative real part.
+
+    """
+
+    return _rss_generate(states, inputs, outputs, 'c')
+
+def drss(states=1, outputs=1, inputs=1):
+    """
+    Create a stable **discrete** random state space object.
+
+    Parameters
+    ----------
+    states: integer
+        Number of state variables
+    inputs: integer
+        Number of system inputs
+    outputs: integer
+        Number of system outputs
+
+    Returns
+    -------
+    sys: StateSpace
+        The randomly created linear system
+
+    Raises
+    ------
+    ValueError
+        if any input is not a positive integer
+
+    See Also
+    --------
+    rss
+
+    Notes
+    -----
+    If the number of states, inputs, or outputs is not specified, then the
+    missing numbers are assumed to be 1.  The poles of the returned system
+    will always have a magnitude less than 1.
+
+    """
+
+    return _rss_generate(states, inputs, outputs, 'd')
+
+def ssdata(sys):
+    '''
+    Return state space data objects for a system
+
+    Parameters
+    ----------
+    sys: LTI (StateSpace, or TransferFunction)
+        LTI system whose data will be returned
+
+    Returns
+    -------
+    (A, B, C, D): list of matrices
+        State space data for the system
+    '''
+    ss = _convertToStateSpace(sys)
+    return (ss.A, ss.B, ss.C, ss.D)

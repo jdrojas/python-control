@@ -124,6 +124,8 @@ from .lti import LTI     # base class of StateSpace, TransferFunction
 from .statesp import _convertToStateSpace, _mimo2simo, _mimo2siso
 from .lti import isdtime, isctime
 
+__all__ = ['forced_response', 'step_response', 'initial_response',
+           'impulse_response']
 
 # Helper function for checking array-like parameters
 def _check_convert_array(in_obj, legal_shapes, err_msg_start, squeeze=False,
@@ -415,7 +417,7 @@ def _get_ss_simo(sys, input=None, output=None):
         return _mimo2siso(sys_ss, input, output, warn_conversion=warn)
 
 def step_response(sys, T=None, X0=0., input=None, output=None,
-                  transpose=False):
+                  transpose=False, return_x=False):
     # pylint: disable=W0622
     """Step response of a linear system
 
@@ -459,6 +461,9 @@ def step_response(sys, T=None, X0=0., input=None, output=None,
     yout: array
         Response of the system
 
+    xout: array
+        Individual response of each x variable
+
     See Also
     --------
     forced_response, initial_response, impulse_response
@@ -478,8 +483,11 @@ def step_response(sys, T=None, X0=0., input=None, output=None,
 
     U = np.ones_like(T)
 
-    T, yout, _xout = forced_response(sys, T, U, X0,
+    T, yout, xout = forced_response(sys, T, U, X0,
                                      transpose=transpose)
+
+    if return_x:
+        return T, yout, xout
 
     return T, yout
 
