@@ -7,7 +7,7 @@ that operate on transfer functions.  This is the primary representation
 for the python-control library.
 """
 
-# Python 3 compatability (needs to go here)
+# Python 3 compatibility (needs to go here)
 from __future__ import print_function
 from __future__ import division
 
@@ -125,7 +125,9 @@ class TransferFunction(LTI):
         # but be careful.
         data = [num, den]
         for i in range(len(data)):
-            if isinstance(data[i], (int, float, complex)):
+            # Check for a scalar (including 0d ndarray)
+            if (isinstance(data[i], (int, float, complex)) or
+                (isinstance(data[i], ndarray) and data[i].ndim == 0)):
                 # Convert scalar to list of list of array.
                 if (isinstance(data[i], int)):
                     # Convert integers to floats at this point
@@ -678,12 +680,9 @@ only implemented for SISO functions.")
                         # keep this zero
                         newzeros.append(z)
 
-                # keep result
-                if len(newzeros):
-                    num[i][j] = gain * real(poly(newzeros))
-                else:
-                    num[i][j] = array([gain])
-                den[i][j] = real(poly(poles))
+                # poly([]) returns a scalar, but we always want a 1d array
+                num[i][j] = np.atleast_1d(gain * real(poly(newzeros)))
+                den[i][j] = np.atleast_1d(real(poly(poles)))
 
         # end result
         return TransferFunction(num, den)
@@ -946,13 +945,23 @@ a zero leading coefficient." % (i, j)
     def dcgain(self):
         """Return the zero-frequency (or DC) gain
 
-        For a transfer function G(s), the DC gain is G(0)
+        For a continous-time transfer function G(s), the DC gain is G(0)
+        For a discrete-time transfer function G(z), the DC gain is G(1)
 
         Returns
         -------
         gain : ndarray
             The zero-frequency gain
         """
+        if self.isctime():
+            return self._dcgain_cont()
+        else:
+            return self(1)
+
+    def _dcgain_cont(self):
+        """_dcgain_cont() -> DC gain as matrix or scalar
+
+        Special cased evaluation at 0 for continuous-time systems"""
         gain = np.empty((self.outputs, self.inputs), dtype=float)
         for i in range(self.outputs):
             for j in range(self.inputs):
@@ -1089,40 +1098,48 @@ def _convertToTransferFunction(sys, **kw):
 
         return sys
     elif isinstance(sys, StateSpace):
-        try:
-            from slycot import tb04ad
-            if len(kw):
-                raise TypeError(
-                    "If sys is a StateSpace, " +
-                    "_convertToTransferFunction cannot take keywords.")
+        
+        if 0==sys.states:
+            # Slycot doesn't like static SS->TF conversion, so handle
+            # it first.  Can't join this with the no-Slycot branch,
+            # since that doesn't handle general MIMO systems
+            num = [[[sys.D[i,j]] for j in range(sys.inputs)] for i in range(sys.outputs)]
+            den = [[[1.] for j in range(sys.inputs)] for i in range(sys.outputs)]
+        else:
+            try:
+                from slycot import tb04ad
+                if len(kw):
+                    raise TypeError(
+                        "If sys is a StateSpace, " +
+                        "_convertToTransferFunction cannot take keywords.")
 
-            # Use Slycot to make the transformation
-            # Make sure to convert system matrices to numpy arrays
-            tfout = tb04ad(sys.states, sys.inputs, sys.outputs, array(sys.A),
-                           array(sys.B), array(sys.C), array(sys.D), tol1=0.0)
+                # Use Slycot to make the transformation
+                # Make sure to convert system matrices to numpy arrays
+                tfout = tb04ad(sys.states, sys.inputs, sys.outputs, array(sys.A),
+                               array(sys.B), array(sys.C), array(sys.D), tol1=0.0)
 
-            # Preallocate outputs.
-            num = [[[] for j in range(sys.inputs)] for i in range(sys.outputs)]
-            den = [[[] for j in range(sys.inputs)] for i in range(sys.outputs)]
+                # Preallocate outputs.
+                num = [[[] for j in range(sys.inputs)] for i in range(sys.outputs)]
+                den = [[[] for j in range(sys.inputs)] for i in range(sys.outputs)]
 
-            for i in range(sys.outputs):
-                for j in range(sys.inputs):
-                    num[i][j] = list(tfout[6][i, j, :])
-                    # Each transfer function matrix row
-                    # has a common denominator.
-                    den[i][j] = list(tfout[5][i, :])
-            # print(num)
-            # print(den)
-        except ImportError:
-            # If slycot is not available, use signal.lti (SISO only)
-            if (sys.inputs != 1 or sys.outputs != 1):
-                raise TypeError("No support for MIMO without slycot")
+                for i in range(sys.outputs):
+                    for j in range(sys.inputs):
+                        num[i][j] = list(tfout[6][i, j, :])
+                        # Each transfer function matrix row
+                        # has a common denominator.
+                        den[i][j] = list(tfout[5][i, :])
+                # print(num)
+                # print(den)
+            except ImportError:
+                # If slycot is not available, use signal.lti (SISO only)
+                if (sys.inputs != 1 or sys.outputs != 1):
+                    raise TypeError("No support for MIMO without slycot")
 
-            lti_sys = lti(sys.A, sys.B, sys.C, sys.D)
-            num = squeeze(lti_sys.num)
-            den = squeeze(lti_sys.den)
-            # print(num)
-            # print(den)
+                lti_sys = lti(sys.A, sys.B, sys.C, sys.D)
+                num = squeeze(lti_sys.num)
+                den = squeeze(lti_sys.den)
+                # print(num)
+                # print(den)
 
         return TransferFunction(num, den, sys.dt)
 
